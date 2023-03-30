@@ -24,6 +24,7 @@ class Route:
   method: str
   params: list[Param]
   returnType: str
+  url: str
 
 
 def get_entities():
@@ -61,18 +62,15 @@ def convert_to_func_name(name: str):
   return name
 
 
-def create_params_and_route(tag: PageElement) -> Route:
+def create_params_and_route(tag: PageElement, endpoint: str) -> Route:
   params = []
 
   # find the route name
-  routeName = tag.find('h2', 'api_method_name')
-  if routeName is not None:
-    routeName = routeName.a.string.strip()
-  else:
-    routeName = "NoRouteName"
-
-  routeNameList = convert_to_func_name(routeName)
-  routeName = ''.join(routeNameList)
+  anchor_element = tag.find('h2', 'api_method_name').find('a')
+  url = endpoint + (anchor_element['href'] or "#")
+  route_name = anchor_element.string.strip() or "NoRouteName"
+  routeNameList = convert_to_func_name(route_name)
+  route_name = ''.join(routeNameList)
 
   # get the endpoint name and endpoint
   thing = tag.find('h3', class_="endpoint")
@@ -105,7 +103,7 @@ def create_params_and_route(tag: PageElement) -> Route:
   if 'a list of' in returnStr:
     entity += '[]'
 
-  route = Route(routeName, clean_text(routeName), clean_text(f"{paramName[:-9]}Params"), endpoint, method, params, entity)
+  route = Route(route_name, clean_text(route_name), clean_text(f"{paramName[:-9]}Params"), endpoint, method, params, entity, url)
   
   if len(route.params) > 0:
     with open(f"../types/params.ts", "a") as f:
@@ -116,7 +114,8 @@ def create_params_and_route(tag: PageElement) -> Route:
 
 def create_interface(route: Route, interfaceName: str):
   interfaceName = clean_text(interfaceName)
-  interface = f'export interface {interfaceName} {{\n'
+  comments = create_comments(route)
+  interface = comments + f'export interface {interfaceName} {{\n'
 
   names = []
   typeDict = {
@@ -310,6 +309,16 @@ def printProgressBar(iteration, total, prefix='', suffix='', decimals=1, length=
   if iteration == total:
     print()
 
+def create_comments(route: Route) -> str:
+  comments = f'/**\n{format_description(route.description)}\n'
+  if len(route.params) > 0:
+    comments += '\n'
+    for param in route.params:
+      comments += f' * @param {param.name} {format_description(param.description)}\n'
+
+  comments += ' */\n'
+
+  return comments
 
 def main():
   with open("endpoints.txt", "r") as f:
@@ -319,7 +328,8 @@ def main():
   total = len(endpoints)
 
   for end in endpoints:
-    page = requests.get(end.strip())
+    end = end.strip()
+    page = requests.get(end)
 
     if page.status_code == 403:
       print("You are being rate limited. Please wait a few minutes and try again.")
@@ -338,7 +348,7 @@ def main():
 
     routes = []
     for tag in tags:
-      routes.append(create_params_and_route(tag))
+      routes.append(create_params_and_route(tag, end))
 
     # write output of create_class to file
     with open(f"../src/{className}.ts", "w") as f:
@@ -349,7 +359,6 @@ def main():
     printProgressBar(progCount, total, 'Generating Routes', length=50)
     # they temporarily ban you if you make too many requests
     sleep(0.1)
-
 
 if __name__ == "__main__":
   main()
